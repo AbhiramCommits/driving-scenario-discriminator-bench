@@ -7,7 +7,7 @@ from typing import Any
 _REGISTRY: dict[str, Any] = {}
 
 
-def register(name: str):
+def register(name: str) -> Any:
     """Decorator registering a trainer class under ``name``."""
 
     def decorator(cls: Any) -> Any:

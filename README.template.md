@@ -73,6 +73,16 @@ Reproduce every number and figure in this README with a single command:
 make reproduce
 ```
 
+Or in Docker (multi-stage: the extension compiles in the builder stage, the
+runtime only carries the benchmark scripts and the installed environment):
+
+```sh
+docker build -t dsdbench .
+docker run --rm dsdbench                                      # quick smoke
+docker run --rm -v "$PWD/experiments:/repo/experiments" \
+                -v "$PWD/artifacts:/repo/artifacts" dsdbench make reproduce
+```
+
 ## Results
 
 Numbers below are generated from the committed sweep artifacts

@@ -9,6 +9,9 @@ dist/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
 .DS_Store
 artifacts/*
 !artifacts/baseline.json

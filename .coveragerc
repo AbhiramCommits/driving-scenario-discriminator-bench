@@ -1,0 +1,5 @@
+[run]
+# The gbt trainer executes LightGBM in a spawned subprocess (OpenMP runtime
+# isolation); coverage does not follow into it, so dsdbench.models.gbt is
+# partially measured. Overall coverage is still gated at 80% in CI.
+source = dsdbench

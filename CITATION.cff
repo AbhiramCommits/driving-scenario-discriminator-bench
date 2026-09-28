@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "dsdbench: a benchmark for detecting simulated driving trajectories"
+authors:
+  - name: "dsdbench contributors"
+abstract: >-
+  A benchmark that measures driving-simulator realism by how well machine
+  learning discriminators can separate simulated trajectories from real ones.
+  It pairs a deterministic C++17 kinematic-bicycle simulator (pure pursuit
+  with injectable error models) with a data layer, three discriminator
+  architectures, and a statistical evaluation harness (scene-clustered BCa
+  bootstrap, exact permutation tests, calibration, slice analysis with FDR
+  control and regression gating).
+keywords:
+  - simulation
+  - driving
+  - benchmark
+  - discriminators
+  - calibration
+  - bootstrap
+license: MIT
+version: 0.1.0
+repository-code: "https://github.com/dsdbench/driving-scenario-discriminator-bench"

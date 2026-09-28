@@ -20,7 +20,7 @@ import dataclasses
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import torch
@@ -102,7 +102,7 @@ class TemporalCNN(nn.Module):
         for block in self.blocks:
             h = block(h)
         h = h.mean(dim=2)  # global average pooling
-        return self.head(h)
+        return cast("torch.Tensor", self.head(h))
 
 
 class TrajTransformer(nn.Module):
@@ -139,7 +139,7 @@ class TrajTransformer(nn.Module):
         h = h + self.pos_embed[:, : seq + 1]
         h = self.encoder(h)
         h = self.norm(h[:, 0])  # CLS token
-        return self.head(h)
+        return cast("torch.Tensor", self.head(h))
 
 
 def build_model(config: TemporalConfig) -> nn.Module:
@@ -161,7 +161,8 @@ def compute_normalization(
 
 
 def normalize(trajectories: np.ndarray, mean: np.ndarray, std: np.ndarray) -> np.ndarray:
-    return (trajectories - mean) / (std + 1e-5)
+    # numpy's unparameterized ndarray arithmetic is inferred as Any.
+    return (trajectories - mean) / (std + 1e-5)  # type: ignore[no-any-return]
 
 
 def fit(
@@ -244,7 +245,7 @@ def predict_probs(
     with torch.no_grad():
         for i in range(0, len(x), batch_size):
             xb = torch.from_numpy(np.asarray(x[i : i + batch_size], np.float32)).to(device)
-            out.append(torch.sigmoid(model(xb).squeeze(-1)).cpu().numpy())
+            out.append(np.asarray(torch.sigmoid(model(xb).squeeze(-1)).cpu().numpy()))
     return np.concatenate(out) if out else np.empty(0, dtype=np.float32)
 
 

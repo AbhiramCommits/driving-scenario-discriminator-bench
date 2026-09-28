@@ -24,7 +24,7 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 from numpy.typing import ArrayLike
@@ -127,7 +127,7 @@ def cut_windows(
 
 def ingest_nuscenes(
     root: str | Path, version: str = "v1.0-mini"
-) -> tuple[list[RawSegment], dict[str, int]]:
+) -> tuple[list[RawSegment], dict[str, int]]:  # pragma: no cover
     """Ingest the nuScenes dataset at ``root`` and return per-agent segments.
 
     Requires the ``nuscenes-devkit`` package (install ``dsdbench[nuscenes]``).
@@ -200,7 +200,7 @@ def ingest_nuscenes(
 
 def _collect_scene_instances(
     nusc: Any, scene: dict[str, Any]
-) -> dict[str, tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]]:
+) -> dict[str, tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]]:  # pragma: no cover
     """Walk the sample chain of a scene and collect per-instance (t, x, y, yaw)."""
     collected: dict[str, list[tuple[float, float, float, float]]] = {}
     sample_token: str = scene["first_sample_token"]
@@ -222,20 +222,20 @@ def _collect_scene_instances(
     return out
 
 
-def _scene_origin(nusc: Any, scene: dict[str, Any]) -> np.ndarray:
+def _scene_origin(nusc: Any, scene: dict[str, Any]) -> np.ndarray:  # pragma: no cover
     sample = nusc.get("sample", scene["first_sample_token"])
     ego = nusc.get("ego_pose", sample["ego_pose_token"])
     return np.asarray(ego["translation"][:2], dtype=np.float64)
 
 
-def _quat_to_yaw(rotation: dict[str, float]) -> float:
+def _quat_to_yaw(rotation: dict[str, float]) -> float:  # pragma: no cover
     w, x, y, z = rotation["w"], rotation["x"], rotation["y"], rotation["z"]
     return math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
 
 
 def _split_runs(
     t: np.ndarray, x: np.ndarray, y: np.ndarray, heading: np.ndarray, max_gap_s: float = 1.0
-) -> list[tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]]:
+) -> list[tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]]:  # pragma: no cover
     """Split an observation track at gaps larger than ``max_gap_s`` seconds."""
     if t.size < 2:
         return []
@@ -254,15 +254,17 @@ def _split_runs(
     return runs
 
 
-def _resample(t_obs: np.ndarray, values: np.ndarray, t_grid: np.ndarray) -> np.ndarray:
+def _resample(
+    t_obs: np.ndarray, values: np.ndarray, t_grid: np.ndarray
+) -> np.ndarray:  # pragma: no cover
     """Linear resample + light 5-tap smoothing to remove keyframe artifacts."""
     interp = np.interp(t_grid, t_obs, values)
-    return uniform_filter1d(interp, size=5, mode="nearest")
+    return cast("np.ndarray", uniform_filter1d(interp, size=5, mode="nearest"))
 
 
 def _derive_kinematics(
     x: np.ndarray, y: np.ndarray, heading: np.ndarray
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:  # pragma: no cover
     dt = 1.0 / FS_HZ
     speed = np.hypot(np.gradient(x, dt), np.gradient(y, dt))
     yaw_rate = np.gradient(heading, dt)

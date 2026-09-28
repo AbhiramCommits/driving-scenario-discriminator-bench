@@ -1,0 +1,37 @@
+name: Wheels
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build_wheels:
+    name: wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-14 is arm64; add a macos-13 (x86_64) runner to publish
+        # macosx_x86_64 wheels.
+        os: [ubuntu-latest, macos-14]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build wheels (cibuildwheel)
+        uses: pypa/cibuildwheel@v2.22.0
+        env:
+          CIBW_BUILD: "cp311-* cp312-*"
+          CIBW_SKIP: "*musllinux*"
+          CIBW_TEST_COMMAND: >
+            python -c "import dsdbench, dsdbench._sim; print(dsdbench._sim.__version__)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: ./wheelhouse/*.whl
+          if-no-files-found: error

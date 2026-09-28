@@ -18,6 +18,8 @@ repos:
     rev: v1.18.2
     hooks:
       - id: mypy
+        # Check the package under strict mode only (see [tool.mypy]).
+        pass_filenames: false
         additional_dependencies: [numpy>=1.26]
 
   - repo: https://github.com/pre-commit/mirrors-clang-format

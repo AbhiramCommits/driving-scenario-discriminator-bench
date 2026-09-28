@@ -21,18 +21,44 @@ jobs:
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install -e ".[dev,ml,eval]"
 
-      - name: Run pytest
-        run: pytest
-
-      - name: Build synthetic benchmark dataset (end-to-end data pipeline)
-        run: >
-          python -m dsdbench.data.pipeline
-          --synthetic-fallback
-          --out-dir build/bench-data
-          --n-scenes 6 --agents-per-scene 8 --duration-s 24
-
-      - name: Build and run C++ tests
+      - name: Build and run C++ tests (Catch2)
         run: |
           cmake -S . -B build -DDSD_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Release
           cmake --build build -j 2
           ctest --test-dir build --output-on-failure
+
+      - name: Run pytest with coverage (fails under 80%)
+        run: >
+          pytest --cov=dsdbench --cov-fail-under=80 --cov-report=term-missing
+
+      - name: Determinism profile (seeded replay across thread counts)
+        run: python scripts/profile_determinism.py
+
+      - name: Smoke benchmark on the synthetic fallback
+        run: >
+          python -m experiments.run_benchmark
+          --quick
+          --out-dir build/bench-smoke
+          --figures-dir build/bench-smoke/figures
+          --baseline-path build/bench-smoke/baseline.json
+
+      - name: Regression gate against the committed baseline
+        run: |
+          python - << 'EOF'
+          from pathlib import Path
+          from experiments.run_benchmark import knob_overrides
+          from dsdbench.data.pipeline import run_pipeline
+
+          ranges, fixed = knob_overrides("mid", 2, 0.0)  # the sweep's representative cell
+          run_pipeline(
+              "build/bench-gate", synthetic_fallback=True, n_scenes=16,
+              agents_per_scene=4, duration_s=12.0, seed=0,
+              knob_ranges=ranges, knob_fixed=fixed,
+          )
+          EOF
+          python -m dsdbench.train --model cnn --config configs/cnn.yaml \
+            --data-dir build/bench-gate --artifacts-dir build/artifacts-gate \
+            --version gate --epochs 2
+          python -m dsdbench.evaluate --run build/artifacts-gate/cnn/gate \
+            --baseline artifacts/baseline.json \
+            --n-resamples 300 --n-permutations 100 --n-jobs 1
