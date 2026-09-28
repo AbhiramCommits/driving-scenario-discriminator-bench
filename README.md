@@ -57,6 +57,36 @@ the split tables from `queries.sql`), `queries.sql`, `manifest.json`. Splits are
 assigned per scene (deterministic md5 buckets, 70/15/15) so no scene leaks
 across train/val/test.
 
+## ML discriminators
+
+`dsdbench/models/` implements the discriminator models behind a name→constructor
+registry (`dsdbench.models.registry`):
+
+- `gbt` — LightGBM on the 30 tabular features: grouped CV by scene, early
+  stopping on the val split, fixed seed, saved booster, and SHAP-based global
+  feature importance (`gbt_shap.json`). Training runs in a spawned subprocess
+  so LightGBM's OpenMP runtime never clashes with PyTorch's.
+- `cnn` — TemporalCNN: 4 dilated 1D conv blocks (1/2/4/8), GroupNorm, GELU,
+  global average pooling, linear head.
+- `transformer` — TrajTransformer: 4-layer encoder, 4 heads, d_model=128,
+  learned positional embeddings, CLS-token pooling.
+
+Both temporal nets share a config dataclass and training loop (AdamW, cosine
+schedule, gradient clipping, AMP on CUDA, deterministic seeding incl.
+`torch.use_deterministic_algorithms` where possible) and run on CPU for CI.
+
+```sh
+pip install -e ".[dev,ml]"          # ml extras: torch, lightgbm, shap, scikit-learn
+python -m dsdbench.train --model gbt --config configs/gbt.yaml
+python -m dsdbench.train --model cnn --config configs/cnn.yaml --epochs 2
+python -m dsdbench.train --model transformer --config configs/transformer.yaml
+```
+
+Each run writes a versioned directory under `artifacts/<model>/<version>/`
+containing `config.yaml`, `metrics.json`, per-segment predicted probabilities
+(`predictions.parquet`), and the model checkpoint (`checkpoint.pt` /
+`model.txt` + `gbt_shap.json`).
+
 ## Install
 
 Requires Python 3.11+ and CMake 3.22+.

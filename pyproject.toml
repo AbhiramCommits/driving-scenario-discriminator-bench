@@ -26,6 +26,12 @@ dev = [
 nuscenes = [
     "nuscenes-devkit>=1.1.9",
 ]
+ml = [
+    "lightgbm>=4.1",
+    "shap>=0.44",
+    "scikit-learn>=1.4",
+    "torch>=2.2",
+]
 
 [tool.scikit-build]
 minimum-version = "0.9"
@@ -51,5 +57,19 @@ python_version = "3.12"
 files = ["dsdbench"]
 
 [[tool.mypy.overrides]]
-module = ["scipy", "scipy.*", "yaml", "nuscenes", "nuscenes.*", "pyarrow", "pyarrow.*"]
+module = [
+    "scipy",
+    "scipy.*",
+    "yaml",
+    "nuscenes",
+    "nuscenes.*",
+    "pyarrow",
+    "pyarrow.*",
+    "torch",
+    "torch.*",
+    "lightgbm",
+    "shap",
+    "sklearn",
+    "sklearn.*",
+]
 ignore_missing_imports = true

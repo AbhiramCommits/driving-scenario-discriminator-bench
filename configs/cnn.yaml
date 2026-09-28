@@ -1,0 +1,20 @@
+# TemporalCNN discriminator on raw (T, 6) trajectory tensors.
+data_dir: data/bench
+artifacts_dir: artifacts
+seed: 0
+
+arch: cnn
+seq_len: 61
+in_channels: 6
+hidden_dim: 64
+kernel_size: 3
+dilations: [1, 2, 4, 8]
+num_groups: 8
+dropout: 0.1
+
+epochs: 20
+batch_size: 64
+lr: 0.001
+weight_decay: 0.0001
+max_grad_norm: 1.0
+use_amp: true

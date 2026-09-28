@@ -1,0 +1,20 @@
+# TrajTransformer discriminator on raw (T, 6) trajectory tensors.
+data_dir: data/bench
+artifacts_dir: artifacts
+seed: 0
+
+arch: transformer
+seq_len: 61
+in_channels: 6
+d_model: 128
+n_layers: 4
+n_heads: 4
+dim_feedforward: 256
+dropout: 0.1
+
+epochs: 20
+batch_size: 64
+lr: 0.001
+weight_decay: 0.0001
+max_grad_norm: 1.0
+use_amp: true

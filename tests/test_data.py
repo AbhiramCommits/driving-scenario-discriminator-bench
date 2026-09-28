@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from pathlib import Path
+from typing import Any
 
 import duckdb
 import numpy as np
@@ -18,7 +19,7 @@ from dsdbench.data.pipeline import assign_splits, iter_sql_statements, run_pipel
 DT = 0.1
 N_SAMPLES = 61  # 6 s at 10 Hz
 
-PIPELINE_KWARGS = {
+PIPELINE_KWARGS: dict[str, Any] = {
     "synthetic_fallback": True,
     "n_scenes": 24,
     "agents_per_scene": 4,
@@ -311,11 +312,11 @@ def test_queries_sql_executes_and_split_tables_populated(built_dataset: tuple[Pa
     ).fetchall()
     assert leaked == []
     for table in ("train_set", "val_set", "test_set", "split_features"):
-        assert con.execute(f"SELECT count(*) FROM {table}").fetchone()[0] > 0
+        assert con.execute(f"SELECT count(*) FROM {table}").fetchall()[0][0] > 0
     # Every row of train/val/test belongs to exactly one split.
     total = con.execute(
         "SELECT (SELECT count(*) FROM train_set) + (SELECT count(*) FROM val_set) "
         "+ (SELECT count(*) FROM test_set)"
-    ).fetchone()[0]
-    assert total == con.execute("SELECT count(*) FROM segments").fetchone()[0]
+    ).fetchall()[0][0]
+    assert total == con.execute("SELECT count(*) FROM segments").fetchall()[0][0]
     con.close()
