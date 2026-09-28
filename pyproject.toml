@@ -1,0 +1,42 @@
+[build-system]
+requires = ["scikit-build-core>=0.9", "pybind11>=2.12"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "dsdbench"
+version = "0.1.0"
+description = "Benchmark for ML discriminators separating real logged driving trajectories from simulated ones"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["numpy>=1.26"]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "pre-commit>=3.7",
+]
+
+[tool.scikit-build]
+minimum-version = "0.9"
+cmake.version = ">=3.22"
+cmake.build-type = "Release"
+wheel.packages = ["dsdbench"]
+sdist.include = ["src", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+# numpy>=2.4 stubs use PEP 695 `type` statements, which mypy only parses at
+# python_version >= 3.12. The code itself remains Python 3.11 compatible.
+python_version = "3.12"
+files = ["dsdbench"]
