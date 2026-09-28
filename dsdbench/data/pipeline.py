@@ -152,6 +152,16 @@ def run_pipeline(
         "sim_config_sampling_ranges": {
             key: list(values) for key, values in SAMPLING_RANGES.items()
         },
+        "pipeline_params": {
+            "synthetic_fallback": synthetic_fallback,
+            "nuscenes_root": str(nuscenes_root) if nuscenes_root is not None else None,
+            "version": version,
+            "n_scenes": n_scenes,
+            "agents_per_scene": agents_per_scene,
+            "duration_s": duration_s,
+            "seed": seed,
+            "n_threads": n_threads,
+        },
     }
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True))
 

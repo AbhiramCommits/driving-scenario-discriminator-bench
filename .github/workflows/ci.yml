@@ -19,7 +19,7 @@ jobs:
           python -m pip install --upgrade pip
           # CPU-only torch first so pip does not pull the large CUDA wheel.
           pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install -e ".[dev,ml]"
+          pip install -e ".[dev,ml,eval]"
 
       - name: Run pytest
         run: pytest

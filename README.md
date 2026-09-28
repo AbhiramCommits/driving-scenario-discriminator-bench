@@ -87,6 +87,38 @@ containing `config.yaml`, `metrics.json`, per-segment predicted probabilities
 (`predictions.parquet`), and the model checkpoint (`checkpoint.pt` /
 `model.txt` + `gbt_shap.json`).
 
+## Evaluation harness
+
+`dsdbench/eval/` scores a discriminator's real-vs-simulated separation with
+rigorous statistics (each module's docstring cites the method):
+
+- `metrics.py` — AUC-ROC, AUC-PR, Youden-threshold accuracy, Brier, ECE/MCE
+  (equal-mass binning; Naeini et al. 2015)
+- `bootstrap.py` — scene-level BCa bootstrap CIs on AUC/ECE (Efron 1987;
+  Field & Welsh 2007), deterministic and joblib-parallel
+- `permutation.py` — exact permutation p-values (Phipson & Smyth 2010) against
+  chance and paired two-model comparisons
+- `power.py` — AUC power analysis and sample-size planning (Hanley & McNeil
+  1982), with a power-curve plot
+- `calibration.py` — Platt and isotonic recalibration fit on val, applied to
+  test, ECE before/after
+- `slices.py` — full metric suite per maneuver slice and simulator-knob
+  bucket, Benjamini-Hochberg FDR (1995), and a regression flag against a
+  stored baseline JSON (exit non-zero to gate CI)
+
+```sh
+pip install -e ".[dev,ml,eval]"        # eval extras: joblib, matplotlib
+python -m dsdbench.evaluate --run artifacts/cnn/<version> \
+    --baseline artifacts/baseline.json   # exit 1 on regression flag
+python -m dsdbench.replay --run artifacts/cnn/<version>   # fixed-seed replay
+```
+
+`evaluate` writes `report.md`, matplotlib figures (ROC per slice, reliability
+diagram, AUC forest plot, power curve), `metrics.json`, and a fresh
+`baseline.json` into `<run_dir>/eval/`. `replay` re-executes the whole
+simulate -> feature -> train -> eval path from the stored configs and fails
+loudly if any reported metric differs by more than 1e-6.
+
 ## Install
 
 Requires Python 3.11+ and CMake 3.22+.
