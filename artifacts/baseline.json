@@ -1,0 +1,47 @@
+{
+  "schema": "dsdbench-slice-baseline-v1",
+  "slices": {
+    "knob:latency_gt0": {
+      "auc": 0.5416666666666667,
+      "ci_high": 0.5416666666666667,
+      "ci_low": 0.5416666666666667,
+      "n": 72
+    },
+    "knob:noise_high": {
+      "auc": 0.5216049382716049,
+      "ci_high": 0.5216049382716049,
+      "ci_low": 0.5148148148148148,
+      "n": 54
+    },
+    "knob:noise_low": {
+      "auc": 0.5617283950617284,
+      "ci_high": 0.5687830687830688,
+      "ci_low": 0.5542328042328042,
+      "n": 54
+    },
+    "maneuver:cut_in": {
+      "auc": 1.0,
+      "ci_high": 1.0,
+      "ci_low": 0.5,
+      "n": 6
+    },
+    "maneuver:lane_keep": {
+      "auc": 0.5578231292517006,
+      "ci_high": 0.6017391304347826,
+      "ci_low": 0.5,
+      "n": 42
+    },
+    "maneuver:merge": {
+      "auc": 0.6666666666666667,
+      "ci_high": 0.8148148148148148,
+      "ci_low": 0.5,
+      "n": 14
+    },
+    "maneuver:unprotected_left": {
+      "auc": 0.52,
+      "ci_high": 0.52,
+      "ci_low": 0.5,
+      "n": 10
+    }
+  }
+}

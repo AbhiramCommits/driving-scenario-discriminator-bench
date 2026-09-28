@@ -18,6 +18,7 @@ the full pipeline runs end-to-end without the dataset. CI uses this flag.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import logging
 import math
 from collections.abc import Sequence
@@ -27,8 +28,9 @@ from typing import Any
 
 import numpy as np
 from numpy.typing import ArrayLike
-from scipy.interpolate import CubicSpline
 from scipy.ndimage import uniform_filter1d
+
+from dsdbench._sim import SimConfig, State, rollout
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +38,11 @@ FS_HZ = 10.0
 WINDOW_S = 6.0
 OVERLAP = 0.5
 
-_SYNTHETIC_TEMPLATES = ("cruise", "cut_in", "merge", "turn_left", "stop_go")
+_SYNTHETIC_TEMPLATES = ("cruise", "cut_in", "merge", "turn_left")
+# Note: "stop_go" is intentionally not a synthetic template: the simulator's
+# longitudinal control is a constant acceleration, so it cannot reproduce a
+# stop-and-go speed profile and its sim counterpart would be trivially
+# detectable (see README Limitations).
 
 
 @dataclass
@@ -268,6 +274,67 @@ def _derive_kinematics(
 # ---------------------------------------------------------------------------
 
 
+def _rollout_reference_windows(
+    x: np.ndarray,
+    y: np.ndarray,
+    heading: np.ndarray,
+    speed: np.ndarray,
+    scene_id: str,
+    agent_token: str,
+) -> list[tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]]:
+    """Roll out the reference controller per 6 s window, exactly like the
+    simulated side (same path fitting, same horizon, no future knowledge)."""
+    window_n = int(round(FS_HZ * WINDOW_S)) + 1
+    step_n = int(round(FS_HZ * WINDOW_S * (1.0 - OVERLAP)))
+    runs = []
+    for i0 in range(0, max(1, x.size - window_n + 1), step_n):
+        i1 = i0 + window_n
+        config = SimConfig()
+        config.dt = 0.1
+        config.lookahead_gain = 0.9
+        config.min_lookahead = 0.3
+        config.wheelbase = 2.7
+        config.max_steer = 0.6
+        config.max_accel = 3.0
+        config.max_decel = 5.0
+        config.accel = 0.0
+        config.pos_noise_std = 0.002
+        config.heading_noise_std = 0.0003
+        config.steer_noise_std = 0.0003
+        config.latency_steps = 0
+        config.steer_bias = 0.0
+
+        from dsdbench.data.sim_generator import fit_reference_path
+
+        path = fit_reference_path(x[i0:i1], y[i0:i1])
+        seed = (
+            int(hashlib.md5(f"{scene_id}:{agent_token}:{i0}".encode()).hexdigest()[:16], 16) % 2**32
+        )
+        trajectory = rollout(
+            path,
+            State(
+                x=float(x[i0]),
+                y=float(y[i0]),
+                heading=float(heading[i0]),
+                speed=float(speed[i0]),
+            ),
+            window_n - 1,
+            config,
+            seed,
+        )
+        runs.append(
+            (
+                np.asarray(trajectory[:, 0]),
+                np.asarray(trajectory[:, 1]),
+                np.asarray(trajectory[:, 2]),
+                np.asarray(trajectory[:, 3]),
+                np.asarray(trajectory[:, 4]),
+                np.asarray(trajectory[:, 5]),
+            )
+        )
+    return runs
+
+
 def ingest_synthetic(
     n_scenes: int = 10,
     agents_per_scene: int = 8,
@@ -276,9 +343,14 @@ def ingest_synthetic(
 ) -> tuple[list[RawSegment], dict[str, int]]:
     """Generate a deterministic stand-in dataset from map-free spline paths.
 
-    Each agent follows a smooth path (spline-integrated heading profile) with a
-    spline speed profile drawn from five maneuver templates, sampled at 10 Hz
-    and cut into 6 s / 50 %-overlap windows exactly like the nuScenes path.
+    Each agent's template defines a reference path (spline-integrated heading
+    profile) and a constant reference speed. The "real" trajectory is a
+    roll-out of the *same* controller used for simulation, with a benign
+    reference config (small noise, no latency, no bias), so the real side has
+    the same discrete-control texture as the simulated side. The simulator's
+    realism knobs are then the only systematic difference the benchmark
+    measures. Runs are cut into 6 s / 50 %-overlap windows exactly like the
+    nuScenes path.
     """
     stats = {
         "n_scenes": 0,
@@ -297,13 +369,16 @@ def ingest_synthetic(
         for ai in range(agents_per_scene):
             agent_token = f"{scene_id}_agent_{ai:02d}"
             template = _SYNTHETIC_TEMPLATES[int(rng.integers(0, len(_SYNTHETIC_TEMPLATES)))]
-            run = _synthesize_run(rng, template, duration_s)
+            t, x, y, heading, speed, yaw_rate = _synthesize_run(rng, template, duration_s)
             stats["n_instances"] += 1
             stats["n_runs"] += 1
-            run_segments = cut_windows(*run, scene_id=scene_id, agent_token=agent_token)
-            segments.extend(run_segments)
-            stats["n_segments"] += len(run_segments)
-            if not run_segments:
+            agent_segments = 0
+            for run in _rollout_reference_windows(x, y, heading, speed, scene_id, agent_token):
+                run_segments = cut_windows(*run, scene_id=scene_id, agent_token=agent_token)
+                segments.extend(run_segments)
+                stats["n_segments"] += len(run_segments)
+                agent_segments += len(run_segments)
+            if agent_segments == 0:
                 stats["skipped_short_track"] += 1
 
     logger.info(
@@ -343,53 +418,59 @@ def _synthesize_run(
 
 
 def _speed_profile(rng: np.random.Generator, template: str, t: np.ndarray) -> np.ndarray:
-    duration = float(t[-1])
-    if template == "stop_go":
-        knots_t = [0.0, 0.3 * duration, 0.45 * duration, 0.55 * duration, 0.7 * duration, duration]
-        knots_v = [8.0, 8.0, 0.0, 0.0, 8.0, 8.0]
-        return np.clip(CubicSpline(knots_t, knots_v)(t), 0.0, None)
     if template == "turn_left":
         base = rng.uniform(4.0, 7.0)
     elif template in ("cut_in", "merge"):
         base = rng.uniform(5.0, 9.0)
     else:
         base = rng.uniform(8.0, 12.0)
-    wiggle = 0.5 * np.sin(2.0 * np.pi * rng.uniform(0.05, 0.2) * t + rng.uniform(0.0, 2.0 * np.pi))
-    return np.clip(base + wiggle, 0.0, None)
+    # Constant speed per run: the simulator's longitudinal control is a
+    # constant acceleration, so injecting speed variation here would create a
+    # trivially detectable sim-real gap unrelated to the realism knobs.
+    # Sensor noise is added later by the pipeline's recorder noise model.
+    return np.full(t.shape, base)
 
 
 def _heading_profile(
     rng: np.random.Generator, template: str, s: np.ndarray, s_max: float
 ) -> np.ndarray:
+    """Smooth heading profile per arc length s (rad).
+
+    Maneuvers use raised-cosine ramps with realistic durations (~20 m lane
+    changes, ~35-45 % of the run for a quarter turn) so heading rates and
+    lateral accelerations stay in physically plausible ranges.
+    """
     if template == "cruise":
         return np.full(s.shape, rng.uniform(-0.03, 0.03))
     if template == "stop_go":
         return np.zeros(s.shape)
     if template == "turn_left":
-        knots_s = [0.0, 0.35 * s_max, 0.7 * s_max, s_max]
-        knots_h = [0.0, 0.0, np.pi / 2.0, np.pi / 2.0]
-        return CubicSpline(knots_s, knots_h)(s)
+        # Smooth quarter turn (CCW) over 35-45% of the run.
+        s0 = rng.uniform(0.25, 0.3) * s_max
+        s1 = s0 + rng.uniform(0.35, 0.45) * s_max
+        total = np.pi / 2.0
+        profile = np.zeros(s.shape)
+        turning = (s > s0) & (s <= s1)
+        profile[turning] = total * (1.0 - np.cos(np.pi * (s[turning] - s0) / (s1 - s0))) / 2.0
+        profile[s > s1] = total
+        return profile
 
-    # Lateral shift templates: heading bumps up, holds, and returns to zero,
-    # for a net lateral displacement of ~2 m (amplitude = 8 / (3 * ramp_len)).
-    ramp_len = rng.uniform(4.0, 6.0)
-    amplitude = 8.0 / (3.0 * ramp_len)
+    # Lateral-shift templates: a smooth raised-cosine heading bump with zero
+    # net heading change. The lateral displacement is A * L / 2, so the
+    # amplitude A = 4 / L yields a ~2 m lane change.
     if template == "merge":
-        # The shift starts immediately: it peaks near the window start.
-        knots_s = [0.0, 0.25 * ramp_len, 0.75 * ramp_len, ramp_len, max(ramp_len + 1.0, s_max)]
-        knots_h = [0.0, amplitude, amplitude, 0.0, 0.0]
-    else:  # cut_in: the shift is delayed into the middle of the run
-        start_s = rng.uniform(0.3, 0.5) * s_max
-        knots_s = [
-            0.0,
-            start_s,
-            start_s + 0.25 * ramp_len,
-            start_s + 0.75 * ramp_len,
-            start_s + ramp_len,
-            min(start_s + ramp_len + 1.0, s_max + 1.0),
-        ]
-        knots_h = [0.0, 0.0, amplitude, amplitude, 0.0, 0.0]
-    return CubicSpline(knots_s, knots_h)(s)
+        # Short bump anchored at the run start (peaks near the window edge).
+        ramp_len = rng.uniform(9.0, 12.0)
+        s0 = 0.0
+    else:  # cut_in: a longer bump in the middle of the run
+        ramp_len = rng.uniform(18.0, 26.0)
+        s0 = rng.uniform(0.3, 0.5) * s_max
+        s0 = min(s0, max(s_max - ramp_len - 1.0, 0.0))
+    amplitude = 4.0 / ramp_len
+    profile = np.zeros(s.shape)
+    bump = (s > s0) & (s <= s0 + ramp_len)
+    profile[bump] = amplitude * (1.0 - np.cos(2.0 * np.pi * (s[bump] - s0) / ramp_len)) / 2.0
+    return profile
 
 
 # ---------------------------------------------------------------------------

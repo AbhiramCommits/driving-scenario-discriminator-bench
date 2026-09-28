@@ -87,3 +87,65 @@ SELECT scene_id, count(DISTINCT split) AS n_splits
 FROM labels
 GROUP BY scene_id
 HAVING n_splits > 1;
+
+-- =============================================================================
+-- SWEEP-SECTION: queries over the sweep_results table written by
+-- experiments/run_benchmark.py (one row per config x model, scope is
+-- 'overall' for headline metrics or 'slice' for maneuver slices).
+-- Executed by run_benchmark against results.duckdb and skipped by
+-- dsdbench.data.pipeline (the sweep table does not exist at pipeline time).
+-- Note: this banner intentionally contains no semicolons so the statement
+-- splitter keeps it intact.
+-- =============================================================================
+
+-- Which simulator knob most degrades realism? For each knob and level, the
+-- mean overall AUC across models and the other knob dimensions. A higher
+-- mean AUC means simulated segments are easier to detect, i.e. less
+-- realistic.
+SELECT 'noise' AS knob,
+       knob_noise AS level,
+       round(avg(auc), 4) AS mean_auc,
+       count(*) AS n_evals
+FROM sweep_results
+WHERE scope = 'overall'
+GROUP BY 2
+UNION ALL
+SELECT 'latency',
+       CAST(knob_latency AS VARCHAR),
+       round(avg(auc), 4),
+       count(*)
+FROM sweep_results
+WHERE scope = 'overall'
+GROUP BY 2
+UNION ALL
+SELECT 'bias',
+       CAST(knob_bias AS VARCHAR),
+       round(avg(auc), 4),
+       count(*)
+FROM sweep_results
+WHERE scope = 'overall'
+GROUP BY 2
+ORDER BY mean_auc DESC;
+
+-- Per-model knob degradation (interaction view).
+SELECT model,
+       knob_noise,
+       knob_latency,
+       knob_bias,
+       round(avg(auc), 4) AS mean_auc
+FROM sweep_results
+WHERE scope = 'overall'
+GROUP BY 1, 2, 3, 4
+ORDER BY model, mean_auc DESC;
+
+-- Which maneuver slice is hardest to simulate faithfully? The slice where
+-- discriminators achieve the highest AUC, averaged over configurations and
+-- models.
+SELECT slice_name,
+       round(avg(auc), 4) AS mean_auc,
+       round(avg(ci_low), 4) AS mean_ci_low,
+       count(*) AS n_evals
+FROM sweep_results
+WHERE scope = 'slice'
+GROUP BY slice_name
+ORDER BY mean_auc DESC;

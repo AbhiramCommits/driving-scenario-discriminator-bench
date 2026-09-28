@@ -1,0 +1,9 @@
+{
+  "horizon": 60,
+  "machine": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "n_rollouts": 256,
+  "repeats": 3,
+  "rollouts_per_sec_n_threads_1": 10645.1,
+  "rollouts_per_sec_n_threads_8": 39536.9,
+  "speedup_8_vs_1": 3.71
+}

@@ -87,66 +87,41 @@ discriminators on each, and evaluates every run on the held-out test scenes.
 Mean AUC-ROC over all 18 sweep configurations, with the 95% scene-level BCa
 bootstrap CI bounds likewise averaged:
 
-| model | mean AUC-ROC | mean 95% BCa CI |
-| --- | --- | --- |
-| cnn | 0.655 | [0.620, 0.679] |
-| gbt | 0.873 | [0.795, 0.912] |
-| transformer | 0.536 | [0.520, 0.551] |
+{{AUC_TABLE}}
 
 ### Calibration (mid-knob configuration, calibrated on val, applied to test)
 
-| model | ECE before | ECE after isotonic |
-| --- | --- | --- |
-| cnn | 0.1451 | 0.4173 |
-| gbt | 0.4234 | 0.0694 |
-| transformer | 0.1015 | 0.4722 |
+{{ECE_TABLE}}
 
 ### Per-maneuver slice AUC (mean over sweep configurations)
 
-| maneuver | cnn | gbt | transformer |
-| --- | --- | --- | --- |
-| cut_in | 0.826 | 0.916 | 0.599 |
-| lane_keep | 0.644 | 0.873 | 0.558 |
-| merge | 0.790 | 0.838 | 0.570 |
-| unprotected_left | 0.604 | 0.888 | 0.529 |
+{{SLICE_TABLE}}
 
 ### Which knob matters most?
 
 Mean overall AUC per knob level, averaged over models and the other knob
 dimensions. The knob whose levels spread the AUC the most is the one that most
-degrades realism: **noise (mean-AUC spread 0.207 across its levels)**.
+degrades realism: **{{KNOB_WORST}}**.
 
-| knob | level | mean AUC |
-| --- | --- | --- |
-| bias | 0 | 0.685 |
-| bias | 0.2 | 0.691 |
-| latency | 0 | 0.640 |
-| latency | 2 | 0.658 |
-| latency | 4 | 0.766 |
-| noise | high | 0.785 |
-| noise | low | 0.578 |
-| noise | mid | 0.701 |
+{{KNOB_TABLE}}
 
 The maneuver slice where simulated driving is most easily detected — i.e. the
-hardest maneuver to simulate faithfully — is **cut_in (mean AUC 0.780 across configurations and models)**.
+hardest maneuver to simulate faithfully — is **{{MANEUVER_HARDEST}}**.
 
 ### Power analysis
 
 To detect a discriminator AUC of 0.55 against the chance null (AUC = 0.5) at
 80% power with α = 0.05 (one-sided, balanced classes, Hanley–McNeil variance),
-the minimum sample size is **816 segments**.
+the minimum sample size is **{{POWER_MIN_N}} segments**.
 
 ### Simulator throughput
 
 `batch_rollout` throughput on the synthetic workload (256 rollouts × 60
 steps), median of 3 repeats, same machine as the sweep:
 
-| threads | rollouts/s |
-| --- | --- |
-| 1 | 10645.1 |
-| 8 | 39536.9 |
+{{TPUT_TABLE}}
 
-Speedup at 8 threads: **3.7x**. Throughput is machine-dependent;
+Speedup at 8 threads: **{{TPUT_SPEEDUP}}**. Throughput is machine-dependent;
 the relative scaling is the meaningful quantity.
 
 ### Figures

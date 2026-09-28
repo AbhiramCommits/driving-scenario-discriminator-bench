@@ -14,7 +14,11 @@ import pytest
 from dsdbench.data.features import FEATURE_NAMES, extract_features
 from dsdbench.data.maneuver_labels import ManeuverLabeler
 from dsdbench.data.nuscenes_ingest import cut_windows
-from dsdbench.data.pipeline import assign_splits, iter_sql_statements, run_pipeline
+from dsdbench.data.pipeline import (
+    assign_splits,
+    pipeline_queries,
+    run_pipeline,
+)
 
 DT = 0.1
 N_SAMPLES = 61  # 6 s at 10 Hz
@@ -304,7 +308,10 @@ def test_queries_sql_executes_and_split_tables_populated(built_dataset: tuple[Pa
     out, _ = built_dataset
     sql_text = (out / "queries.sql").read_text()
     con = duckdb.connect(str(out / "benchmark.duckdb"))
-    for stmt in iter_sql_statements(sql_text):
+    # The dataset pipeline executes only the pre-sweep section of queries.sql
+    # (the sweep section needs the sweep_results table, which does not exist
+    # at pipeline time).
+    for stmt in pipeline_queries(sql_text):
         con.execute(stmt)
     leaked = con.execute(
         "SELECT scene_id, count(DISTINCT split) AS n_splits FROM labels "

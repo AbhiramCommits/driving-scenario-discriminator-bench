@@ -37,7 +37,10 @@ SAMPLING_RANGES: dict[str, tuple[float, float]] = {
     "max_accel": (2.5, 4.0),
     "max_decel": (4.0, 6.0),
     "accel": (-0.5, 0.5),
-    "lookahead_gain": (2.0, 5.0),
+    # Lookahead distance = lookahead_gain * speed; sampled over a ~0.6-1.4 s
+    # time horizon so the controller tracks maneuver-scale curvature instead
+    # of cutting through it (a multi-second lookahead skips short bumps).
+    "lookahead_gain": (0.6, 1.4),
     "min_lookahead": (0.2, 1.0),
     "pos_noise_std": (1e-3, 0.15),
     "heading_noise_std": (1e-4, 0.03),
@@ -76,23 +79,38 @@ def _seed_from_str(s: str) -> int:
 
 
 def sample_config(
-    rng: np.random.Generator, *, dt: float = 0.1, latency_max: int = 4
+    rng: np.random.Generator,
+    *,
+    dt: float = 0.1,
+    latency_max: int = 4,
+    ranges: dict[str, tuple[float, float]] | None = None,
+    fixed: dict[str, float | int] | None = None,
 ) -> tuple[SimConfig, dict[str, float | int]]:
-    """Sample one SimConfig; returns the config and its plain-dict record."""
+    """Sample one SimConfig; returns the config and its plain-dict record.
+
+    ``ranges`` overrides sampling ranges per knob (useful for realism sweeps)
+    and ``fixed`` pins a knob to an exact value instead of sampling it.
+    """
+    ranges = {**SAMPLING_RANGES, **(ranges or {})}
+    fixed = fixed or {}
     cfg = SimConfig()
-    cfg.dt = dt
-    cfg.wheelbase = float(rng.uniform(*SAMPLING_RANGES["wheelbase"]))
-    cfg.max_steer = 0.6  # fixed
-    cfg.max_accel = float(rng.uniform(*SAMPLING_RANGES["max_accel"]))
-    cfg.max_decel = float(rng.uniform(*SAMPLING_RANGES["max_decel"]))
-    cfg.accel = float(rng.uniform(*SAMPLING_RANGES["accel"]))
-    cfg.lookahead_gain = float(rng.uniform(*SAMPLING_RANGES["lookahead_gain"]))
-    cfg.min_lookahead = float(rng.uniform(*SAMPLING_RANGES["min_lookahead"]))
-    cfg.pos_noise_std = _loguniform(rng, "pos_noise_std")
-    cfg.heading_noise_std = _loguniform(rng, "heading_noise_std")
-    cfg.latency_steps = int(rng.integers(0, latency_max + 1))
-    cfg.steer_bias = float(rng.uniform(*SAMPLING_RANGES["steer_bias"]))
-    cfg.steer_noise_std = _loguniform(rng, "steer_noise_std")
+    cfg.dt = float(fixed.get("dt", dt))
+    cfg.wheelbase = float(fixed.get("wheelbase", rng.uniform(*ranges["wheelbase"])))
+    cfg.max_steer = float(fixed.get("max_steer", 0.6))
+    cfg.max_accel = float(fixed.get("max_accel", rng.uniform(*ranges["max_accel"])))
+    cfg.max_decel = float(fixed.get("max_decel", rng.uniform(*ranges["max_decel"])))
+    cfg.accel = float(fixed.get("accel", rng.uniform(*ranges["accel"])))
+    cfg.lookahead_gain = float(fixed.get("lookahead_gain", rng.uniform(*ranges["lookahead_gain"])))
+    cfg.min_lookahead = float(fixed.get("min_lookahead", rng.uniform(*ranges["min_lookahead"])))
+    cfg.pos_noise_std = float(fixed.get("pos_noise_std", _loguniform(rng, "pos_noise_std", ranges)))
+    cfg.heading_noise_std = float(
+        fixed.get("heading_noise_std", _loguniform(rng, "heading_noise_std", ranges))
+    )
+    cfg.latency_steps = int(fixed.get("latency_steps", rng.integers(0, latency_max + 1)))
+    cfg.steer_bias = float(fixed.get("steer_bias", rng.uniform(*ranges["steer_bias"])))
+    cfg.steer_noise_std = float(
+        fixed.get("steer_noise_std", _loguniform(rng, "steer_noise_std", ranges))
+    )
     record = {
         "dt": float(cfg.dt),
         "wheelbase": float(cfg.wheelbase),
@@ -111,8 +129,10 @@ def sample_config(
     return cfg, record
 
 
-def _loguniform(rng: np.random.Generator, key: str) -> float:
-    lo, hi = SAMPLING_RANGES[key]
+def _loguniform(
+    rng: np.random.Generator, key: str, ranges: dict[str, tuple[float, float]] | None = None
+) -> float:
+    lo, hi = (ranges or SAMPLING_RANGES)[key]
     return float(np.exp(rng.uniform(np.log(lo), np.log(hi))))
 
 
@@ -120,16 +140,18 @@ def fit_reference_path(
     x: ArrayLike,
     y: ArrayLike,
     *,
-    n_points: int = 200,
+    n_points: int = 400,
     tail_m: float = 10.0,
     smoothing_rms: float = 0.05,
 ) -> np.ndarray:
     """Fit a smoothing spline through (x, y) and return a (N, 2) polyline.
 
     The spline is parameterized by arc length, smoothed to roughly
-    ``smoothing_rms`` metres of residual, resampled to ``n_points`` points and
-    extended ``tail_m`` metres along the final tangent so the pure-pursuit
-    controller has lookahead beyond the segment end.
+    ``smoothing_rms`` metres of residual (large enough to ignore recorder
+    noise in the fitted path, small enough to keep maneuver structure),
+    resampled to ``n_points`` points and extended ``tail_m`` metres along the
+    final tangent so the pure-pursuit controller has lookahead beyond the
+    segment end.
     """
     x_arr = np.asarray(x, dtype=np.float64)
     y_arr = np.asarray(y, dtype=np.float64)
@@ -168,12 +190,15 @@ def generate_matched(
     real_segments: Sequence[RawSegment],
     n_threads: int | None = None,
     seed_base: int = DEFAULT_SEED_BASE,
+    ranges_override: dict[str, tuple[float, float]] | None = None,
+    fixed_override: dict[str, float | int] | None = None,
 ) -> list[SimSegment]:
     """Generate one simulated counterpart per real segment via batch_rollout.
 
     Deterministic: config sampling is seeded from (scene, agent) ids and the
     rollout seeds come from ``seed_base`` + scenario index, independent of
-    thread count.
+    thread count. ``ranges_override`` / ``fixed_override`` shift the realism
+    knobs for benchmark sweeps (see ``sample_config``).
     """
     if not real_segments:
         return []
@@ -188,7 +213,7 @@ def generate_matched(
     for seg in real_segments:
         config_seed = _seed_from_str(f"{seg.scene_id}:{seg.agent_token}")
         rng = np.random.default_rng(config_seed)
-        cfg, record = sample_config(rng)
+        cfg, record = sample_config(rng, ranges=ranges_override, fixed=fixed_override)
         if float(np.max(seg.speed)) < 0.5:
             # A stationary real vehicle should not be simulated as creeping away.
             cfg.accel = min(cfg.accel, 0.0)

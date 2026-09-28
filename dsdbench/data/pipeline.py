@@ -41,6 +41,19 @@ from dsdbench.data.sim_generator import SAMPLING_RANGES, generate_matched
 logger = logging.getLogger(__name__)
 
 QUERIES_SQL = Path(__file__).with_name("queries.sql")
+SWEEP_MARKER = "-- SWEEP-SECTION:"
+
+# Deterministic sensor ("recorder") noise applied to both real and simulated
+# recordings before anything is persisted. Real logged data always carries
+# sensor noise, and the simulator's output is exact ground truth; without a
+# shared recorder model the two sides would be trivially separable by
+# numerical roughness alone, masking the realism knobs under study.
+RECORDER_NOISE = {
+    "pos_std": 0.02,  # m, per axis
+    "heading_std": 0.005,  # rad
+    "speed_std": 0.05,  # m/s
+    "yaw_std": 0.005,  # rad/s
+}
 
 
 def assign_splits(
@@ -77,6 +90,56 @@ def iter_sql_statements(sql_text: str) -> list[str]:
     return statements
 
 
+def pipeline_queries(sql_text: str) -> list[str]:
+    """Statements of queries.sql that the dataset pipeline executes (before
+    the ``SWEEP_MARKER`` banner; sweep queries need the sweep_results table
+    which only exists after experiments/run_benchmark.py runs)."""
+    lines = sql_text.splitlines()
+    cut = next((i for i, line in enumerate(lines) if line.startswith(SWEEP_MARKER)), len(lines))
+    return iter_sql_statements("\n".join(lines[:cut]))
+
+
+def sweep_queries(sql_text: str) -> list[str]:
+    """Statements of queries.sql that run over the sweep results table
+    (from the ``SWEEP_MARKER`` banner onward; executed by
+    experiments/run_benchmark.py against results.duckdb)."""
+    lines = sql_text.splitlines()
+    cut = next((i for i, line in enumerate(lines) if line.startswith(SWEEP_MARKER)), len(lines))
+    return iter_sql_statements("\n".join(lines[cut:]))
+
+
+def _recorder_seed(key: str) -> int:
+    return int(hashlib.md5(key.encode("utf-8")).hexdigest()[:16], 16) % 2**32
+
+
+def _apply_recorder_noise(segments: list[RawSegment], *, tag: str) -> None:
+    """Apply a deterministic recording model (sensor noise + bandwidth limit)
+    to a set of recordings.
+
+    Real sensors add Gaussian noise and low-pass the signal; the simulator
+    output is exact ground truth. Recording both sides with the same model
+    keeps them comparable and prevents numerical roughness alone from being a
+    trivially detectable sim fingerprint.
+    """
+    from scipy.ndimage import uniform_filter1d
+
+    for seg in segments:
+        rng = np.random.default_rng(_recorder_seed(f"{seg.scene_id}:{seg.agent_token}:{tag}"))
+        seg.x = seg.x + rng.normal(0.0, RECORDER_NOISE["pos_std"], seg.x.shape)
+        seg.y = seg.y + rng.normal(0.0, RECORDER_NOISE["pos_std"], seg.y.shape)
+        seg.heading = seg.heading + rng.normal(
+            0.0, RECORDER_NOISE["heading_std"], seg.heading.shape
+        )
+        seg.speed = np.clip(
+            seg.speed + rng.normal(0.0, RECORDER_NOISE["speed_std"], seg.speed.shape), 0.0, None
+        )
+        seg.yaw_rate = seg.yaw_rate + rng.normal(0.0, RECORDER_NOISE["yaw_std"], seg.yaw_rate.shape)
+        # Sensor bandwidth: 3-tap low-pass (0.3 s window at 10 Hz).
+        seg.heading = uniform_filter1d(seg.heading, size=3, mode="nearest")
+        seg.speed = uniform_filter1d(seg.speed, size=3, mode="nearest")
+        seg.yaw_rate = uniform_filter1d(seg.yaw_rate, size=3, mode="nearest")
+
+
 def run_pipeline(
     out_dir: str | Path,
     *,
@@ -89,13 +152,22 @@ def run_pipeline(
     seed: int = 0,
     n_threads: int | None = None,
     db_name: str = "benchmark.duckdb",
+    knob_ranges: dict[str, tuple[float, float] | list[float]] | None = None,
+    knob_fixed: dict[str, float | int] | None = None,
 ) -> dict[str, Any]:
-    """Run the full pipeline and return a build summary dict."""
+    """Run the full pipeline and return a build summary dict.
+
+    ``knob_ranges`` / ``knob_fixed`` override the simulator realism knobs for
+    benchmark sweeps (see ``dsdbench.data.sim_generator.sample_config``).
+    """
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
 
     if synthetic_fallback:
         real_segments, ingest_stats = ingest_synthetic(n_scenes, agents_per_scene, duration_s, seed)
+        # The synthetic fallback generates noiseless "recordings"; add the
+        # shared recorder noise so they resemble logged sensor data.
+        _apply_recorder_noise(real_segments, tag="real")
     else:
         if nuscenes_root is None:
             raise ValueError("--nuscenes-root is required unless --synthetic-fallback is set")
@@ -103,7 +175,18 @@ def run_pipeline(
     if not real_segments:
         raise ValueError("no real segments produced; increase the run duration or dataset size")
 
-    sim_segments = generate_matched(real_segments, n_threads=n_threads)
+    ranges_override = {
+        key: (float(values[0]), float(values[1])) for key, values in (knob_ranges or {}).items()
+    }
+    sim_segments = generate_matched(
+        real_segments,
+        n_threads=n_threads,
+        ranges_override=ranges_override or None,
+        fixed_override=knob_fixed,
+    )
+    # The simulator output is exact ground truth; record it with the same
+    # sensor model as the real side.
+    _apply_recorder_noise([sim_seg.segment for sim_seg in sim_segments], tag="sim")
     labeler = ManeuverLabeler()
     splits = assign_splits(seg.scene_id for seg in real_segments)
 
@@ -161,6 +244,8 @@ def run_pipeline(
             "duration_s": duration_s,
             "seed": seed,
             "n_threads": n_threads,
+            "knob_ranges": {k: list(v) for k, v in ranges_override.items()} or None,
+            "knob_fixed": knob_fixed,
         },
     }
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True))
@@ -248,7 +333,7 @@ def _load_duckdb(out: Path, db_name: str) -> None:
             f"CREATE OR REPLACE TABLE {table} AS SELECT * FROM read_parquet(?)",
             [parquet_path],
         )
-    for stmt in iter_sql_statements(QUERIES_SQL.read_text()):
+    for stmt in pipeline_queries(QUERIES_SQL.read_text()):
         con.execute(stmt)
     leaked = con.execute(
         "SELECT scene_id, count(DISTINCT split) AS n_splits FROM labels "

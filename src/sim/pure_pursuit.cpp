@@ -26,11 +26,39 @@ double PurePursuitController::compute_steer(const State &state, const Path &path
 
     const double lookahead = std::max(lookahead_gain_ * state.speed, min_lookahead_);
 
+    // Find the segment closest to the vehicle: on paths that double back
+    // (e.g. U-turns) the lookahead circle intersects both ahead and behind
+    // the vehicle, and searching from the path start would target points
+    // behind it, sending the vehicle into a spin.
+    std::size_t start_idx = 0;
+    {
+        double best_d2 = std::numeric_limits<double>::max();
+        for (std::size_t i = 0; i + 1 < path.points.size(); ++i) {
+            const Vec2 a = path.points[i];
+            const Vec2 b = path.points[i + 1];
+            const double dx = b.x - a.x;
+            const double dy = b.y - a.y;
+            const double d2 = dx * dx + dy * dy;
+            if (d2 < 1e-12) {
+                continue;
+            }
+            const double t =
+                std::clamp(((state.x - a.x) * dx + (state.y - a.y) * dy) / d2, 0.0, 1.0);
+            const Vec2 p{a.x + t * dx, a.y + t * dy};
+            const double dd2 =
+                (p.x - state.x) * (p.x - state.x) + (p.y - state.y) * (p.y - state.y);
+            if (dd2 < best_d2) {
+                best_d2 = dd2;
+                start_idx = i;
+            }
+        }
+    }
+
     // Find the first intersection of the circle (center = rear axle, radius =
-    // lookahead) with the polyline.
+    // lookahead) with the polyline, walking forward from the closest segment.
     Vec2 target = path.points.front();
     bool found = false;
-    for (std::size_t i = 0; i + 1 < path.points.size(); ++i) {
+    for (std::size_t i = start_idx; i + 1 < path.points.size(); ++i) {
         const Vec2 a = path.points[i];
         const Vec2 b = path.points[i + 1];
         const double dx = b.x - a.x;
