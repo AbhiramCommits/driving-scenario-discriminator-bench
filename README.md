@@ -18,8 +18,44 @@ so the real-vs-simulated gap can be tuned and studied systematically.
   controller, observation noise models, deterministic batch rollout engine
 - `src/bindings/` — pybind11 bindings exposed as `dsdbench._sim`
 - `dsdbench/` — Python package (Python 3.11+)
+- `dsdbench/data/` — data layer: ingestion, simulation, labeling, features,
+  persistence (see below)
 - `tests/cpp/` — Catch2 unit tests for the C++ core
-- `tests/` — pytest tests for the Python bindings
+- `tests/` — pytest tests for the Python bindings and data layer
+
+## Data layer
+
+`dsdbench/data/` builds the benchmark dataset end-to-end:
+
+1. `nuscenes_ingest.py` — ingests the nuScenes v1.0-mini split (via
+   `nuscenes-devkit`, install with `pip install "dsdbench[nuscenes]"`), resamples
+   per-agent tracks to 10 Hz, cuts 6 s / 50 %-overlap windows in a map-relative
+   frame, and skips short tracks with logged counts. `--synthetic-fallback`
+   generates a deterministic stand-in dataset from map-free spline paths so the
+   pipeline runs without the dataset download (CI uses this flag).
+2. `sim_generator.py` — fits a smoothing-spline reference path per real segment
+   and rolls out a matched simulated counterpart with `dsdbench._sim`, sampling
+   `SimConfig` realism knobs that are recorded per segment as ground truth.
+3. `maneuver_labels.py` — rule-based labeling (`cut_in`, `merge`,
+   `unprotected_left`, `lane_keep`, `stop_and_go`), thresholds documented in the
+   docstring and configurable via `maneuver_config.yaml`.
+4. `features.py` — 30 scalar features per segment (jerk/lateral-accel stats,
+   yaw-rate spectral energy via Welch, curvature-speed correlation,
+   heading-change smoothness, TTC proxies).
+
+```sh
+# Real ingest (requires nuScenes credentials + dataroot)
+python -m dsdbench.data.pipeline --out-dir data/bench --nuscenes-root /path/to/v1.0-mini
+
+# Synthetic fallback (no dataset download)
+python -m dsdbench.data.pipeline --synthetic-fallback --out-dir data/bench
+```
+
+Outputs in the out-dir: `segments.parquet` (long format, one row per timestep),
+`labels.parquet`, `features.parquet`, `benchmark.duckdb` (DuckDB database with
+the split tables from `queries.sql`), `queries.sql`, `manifest.json`. Splits are
+assigned per scene (deterministic md5 buckets, 70/15/15) so no scene leaks
+across train/val/test.
 
 ## Install
 

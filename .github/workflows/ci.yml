@@ -22,6 +22,13 @@ jobs:
       - name: Run pytest
         run: pytest
 
+      - name: Build synthetic benchmark dataset (end-to-end data pipeline)
+        run: >
+          python -m dsdbench.data.pipeline
+          --synthetic-fallback
+          --out-dir build/bench-data
+          --n-scenes 6 --agents-per-scene 8 --duration-s 24
+
       - name: Build and run C++ tests
         run: |
           cmake -S . -B build -DDSD_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Release

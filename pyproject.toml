@@ -8,7 +8,13 @@ version = "0.1.0"
 description = "Benchmark for ML discriminators separating real logged driving trajectories from simulated ones"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["numpy>=1.26"]
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "pyarrow>=14",
+    "duckdb>=0.10",
+    "pyyaml>=6.0",
+]
 
 [project.optional-dependencies]
 dev = [
@@ -16,6 +22,9 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.11",
     "pre-commit>=3.7",
+]
+nuscenes = [
+    "nuscenes-devkit>=1.1.9",
 ]
 
 [tool.scikit-build]
@@ -40,3 +49,7 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 # python_version >= 3.12. The code itself remains Python 3.11 compatible.
 python_version = "3.12"
 files = ["dsdbench"]
+
+[[tool.mypy.overrides]]
+module = ["scipy", "scipy.*", "yaml", "nuscenes", "nuscenes.*", "pyarrow", "pyarrow.*"]
+ignore_missing_imports = true
