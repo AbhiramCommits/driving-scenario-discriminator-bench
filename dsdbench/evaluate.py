@@ -29,6 +29,7 @@ from dsdbench.eval.calibration import RecalibrationResult, recalibrate
 from dsdbench.eval.permutation import permutation_test
 from dsdbench.eval.report import EvalArtifacts, build_report, save_figures
 from dsdbench.eval.slices import (
+    DEFAULT_MIN_SLICE_N,
     SliceConfig,
     SliceReport,
     baseline_from_report,
@@ -46,6 +47,7 @@ DEFAULTS = {
     "n_jobs": -1,
     "alpha": 0.05,
     "regression_threshold": 0.05,
+    "min_slice_n": DEFAULT_MIN_SLICE_N,
     "seed": 0,
 }
 
@@ -160,7 +162,10 @@ def run_evaluation(
     regression: dict[str, Any] | None = None
     if baseline is not None:
         regression = check_regression(
-            slice_report, baseline, threshold=cfg["regression_threshold"]
+            slice_report,
+            baseline,
+            threshold=cfg["regression_threshold"],
+            min_slice_n=cfg.get("min_slice_n", DEFAULT_MIN_SLICE_N),
         ).to_dict()
 
     summary: dict[str, Any] = {
@@ -230,6 +235,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=DEFAULTS["regression_threshold"],
         help="AUC drop below baseline that flags a regression.",
     )
+    parser.add_argument(
+        "--min-slice-n",
+        type=int,
+        default=DEFAULTS["min_slice_n"],
+        help="Slices with fewer segments (baseline or current) are not regression-checked.",
+    )
     parser.add_argument("--seed", type=int, default=DEFAULTS["seed"])
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -241,6 +252,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "n_jobs": args.n_jobs,
         "alpha": args.alpha,
         "regression_threshold": args.threshold,
+        "min_slice_n": args.min_slice_n,
         "seed": args.seed,
     }
     baseline = None

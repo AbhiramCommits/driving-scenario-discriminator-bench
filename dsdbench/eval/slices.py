@@ -216,6 +216,11 @@ def _benjamini_hochberg(pvalues: np.ndarray) -> np.ndarray:
     return np.asarray(false_discovery_control(pvalues, method="bh"), dtype=np.float64)
 
 
+# Below this many segments a slice's bootstrap AUC CI spans most of [0.5, 1],
+# so comparing it against a baseline is noise rather than signal.
+DEFAULT_MIN_SLICE_N = 30
+
+
 def baseline_from_report(report: SliceReport) -> dict[str, Any]:
     """Serialize a slice report into the stored baseline JSON schema."""
     return {
@@ -228,13 +233,20 @@ def baseline_from_report(report: SliceReport) -> dict[str, Any]:
 
 
 def check_regression(
-    report: SliceReport, baseline: dict[str, Any], threshold: float = 0.05
+    report: SliceReport,
+    baseline: dict[str, Any],
+    threshold: float = 0.05,
+    min_slice_n: int = DEFAULT_MIN_SLICE_N,
 ) -> RegressionResult:
-    """Flag slices whose AUC CI lower bound fell below the stored baseline.
+    """Flag slices that got detectably and materially worse than the baseline.
 
-    A slice is violated when ``current_ci_low < baseline_auc - threshold``, or
-    when the baseline contains a slice that is missing from the current report
-    (e.g. the model lost the ability to even score a maneuver)."""
+    A slice is violated when its current AUC CI lies entirely below the
+    baseline's CI (``current_ci_high < baseline_ci_low``) *and* its point AUC
+    dropped by more than ``threshold``, or when the baseline contains a slice
+    that is missing from the current report (e.g. the model lost the ability to
+    even score a maneuver). Slices with fewer than ``min_slice_n`` segments in
+    the baseline or the current run are not compared: their bootstrap CIs are
+    too wide for an AUC difference to mean anything."""
     if baseline.get("schema") != BASELINE_SCHEMA:
         raise ValueError("baseline is not a dsdbench slice baseline JSON")
     baseline_slices = baseline.get("slices", {})
@@ -247,17 +259,19 @@ def check_regression(
                 {"slice": name, "reason": "missing", "baseline_auc": stored["auc"], "ci_low": None}
             )
             continue
-        limit = float(stored["auc"]) - threshold
-        if result.ci_low < limit:
+        if int(stored["n"]) < min_slice_n or result.n < min_slice_n:
+            continue
+        auc_drop = float(stored["auc"]) - result.auc
+        if result.ci_high < float(stored["ci_low"]) and auc_drop > threshold:
             violations.append(
                 {
                     "slice": name,
-                    "reason": "auc_ci_low_below_baseline",
+                    "reason": "auc_ci_below_baseline_ci",
                     "baseline_auc": stored["auc"],
+                    "baseline_ci_low": stored["ci_low"],
                     "current_auc": result.auc,
-                    "ci_low": result.ci_low,
-                    "limit": limit,
-                    "delta": float(stored["auc"]) - result.ci_low,
+                    "ci_high": result.ci_high,
+                    "delta": auc_drop,
                 }
             )
     return RegressionResult(flag=len(violations) > 0, threshold=threshold, violations=violations)
