@@ -98,22 +98,29 @@ power(A, n, α, A₀) = Φ( (A − A₀) / SE(A, n/2, n/2) − z_{1−α} ).
 ## 3. Regression-flag criterion
 
 For every slice `s` the harness stores a baseline JSON containing the slice
-AUC `b_s` measured on a reference run. A later evaluation produces, for the
-same slice, a scene-clustered BCa bootstrap CI with lower bound `l_s`. With
-threshold `τ` (default 0.05), the regression flag is
+AUC `b_s`, its CI lower bound `bl_s` and segment count `bn_s`, measured on a
+reference run. A later evaluation produces, for the same slice, AUC `a_s` and a
+scene-clustered BCa bootstrap CI `[l_s, u_s]` over `n_s` segments. With
+threshold `τ` (default 0.05) and minimum slice size `N` (default 30), the
+regression flag is
 
 ```
-flag = ∃ s :  l_s < b_s − τ      (slice got detectably worse)
+flag = ∃ s :  min(n_s, bn_s) ≥ N  ∧  u_s < bl_s  ∧  a_s < b_s − τ
+                                         (slice got detectably and materially worse)
      ∨ ∃ s :  s ∈ baseline ∧ s ∉ current report   (slice disappeared)
 ```
 
 Notes:
 
-- The criterion uses the **CI lower bound**, not the point estimate, so a
-  flagged regression is "statistically detectable", not just unlucky sampling;
-  point estimates that dip inside the CI do not flag.
+- A slice flags only when the **current CI lies entirely below the baseline
+  CI**, so a flagged regression is "statistically detectable", not sampling
+  noise in either run; point estimates that move within overlapping CIs do not
+  flag.
 - `τ` is the smallest drop considered material (0.05 AUC by default); it is
   configurable via `--threshold` in `python -m dsdbench.evaluate`.
+- Slices with fewer than `N` segments in either run are not compared: with a
+  handful of segments the bootstrap CI spans most of `[0.5, 1]` (a 6-segment
+  slice can score AUC 1.0 by chance). `N` is configurable via `--min-slice-n`.
 - A missing slice always flags, regardless of `τ`: a model that can no longer
   be scored on a maneuver is a regression by definition.
 - The flag is returned by `check_regression` and turned into a non-zero exit

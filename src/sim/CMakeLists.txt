@@ -13,3 +13,6 @@ target_include_directories(dsd_sim PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOUR
 if(NOT MSVC)
   target_compile_options(dsd_sim PRIVATE -Wall -Wextra)
 endif()
+
+# Linked into the _sim Python extension (a shared object), so it must be PIC.
+set_target_properties(dsd_sim PROPERTIES POSITION_INDEPENDENT_CODE ON)

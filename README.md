@@ -189,10 +189,11 @@ docstring. The design choices, and why:
 - **Hanley–McNeil power analysis** (1982). Sample-size planning for detecting
   small realism gaps, so "we don't see a difference" never silently means "we
   didn't collect enough segments".
-- **Regression gating.** A slice's AUC CI lower bound dropping more than a
-  threshold below a stored baseline (or a slice vanishing entirely) fails the
-  evaluation with a non-zero exit code, so CI can enforce "no realism
-  regressions".
+- **Regression gating.** A slice whose AUC CI falls entirely below the stored
+  baseline's CI, with the AUC down by more than a threshold (or a slice
+  vanishing entirely), fails the evaluation with a non-zero exit code, so CI
+  can enforce "no realism regressions". Slices under 30 segments are too noisy
+  to compare and are skipped.
 
 ## Limitations
 

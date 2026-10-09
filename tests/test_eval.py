@@ -245,7 +245,7 @@ def test_regression_flag_fires_on_degraded_baseline():
     assert result.flag
     assert len(result.violations) == 1
     assert result.violations[0]["slice"] == "maneuver:cut_in"
-    assert result.violations[0]["reason"] == "auc_ci_low_below_baseline"
+    assert result.violations[0]["reason"] == "auc_ci_below_baseline_ci"
 
 
 def test_regression_flag_missing_slice():
@@ -254,6 +254,24 @@ def test_regression_flag_missing_slice():
     result = check_regression(current, baseline, threshold=0.05)
     assert result.flag
     assert result.violations[0]["reason"] == "missing"
+
+
+def test_regression_flag_ignores_overlapping_cis():
+    # Point AUC fell by more than the threshold, but the CIs still overlap:
+    # not distinguishable from sampling noise, so no flag.
+    baseline = baseline_from_report(_slice_report([("maneuver:merge", 0.80, 0.70)]))
+    current = _slice_report([("maneuver:merge", 0.70, 0.62)])  # ci_high 0.72 >= 0.70
+    result = check_regression(current, baseline, threshold=0.05)
+    assert not result.flag
+
+
+def test_regression_flag_skips_small_slices():
+    baseline = baseline_from_report(_slice_report([("maneuver:cut_in", 1.0, 0.95)]))
+    for r in baseline["slices"].values():
+        r["n"] = 6
+    degraded = _slice_report([("maneuver:cut_in", 0.60, 0.50)])
+    assert not check_regression(degraded, baseline, threshold=0.05).flag
+    assert check_regression(degraded, baseline, threshold=0.05, min_slice_n=5).flag
 
 
 def test_regression_flag_clean_when_within_tolerance():
@@ -347,11 +365,25 @@ def test_evaluate_cli_regression_flag_gates(smoke_run: Path):
     # Self-sufficient: produce a baseline, inflate it, and re-check.
     assert evaluate_main(["--run", str(smoke_run), *EVAL_ARGS]) == 0
     baseline = json.loads((smoke_run / "eval" / "baseline.json").read_text())
-    for name in baseline["slices"]:
-        baseline["slices"][name]["auc"] += 0.2
+    # Shift each stored slice clear above the current run: higher AUC and a CI
+    # that starts above the current CI's upper bound.
+    for stored in baseline["slices"].values():
+        stored["auc"] += 0.2
+        stored["ci_low"] = stored["ci_high"] + 0.01
     degraded_path = smoke_run / "degraded-baseline.json"
     degraded_path.write_text(json.dumps(baseline))
-    rc = evaluate_main(["--run", str(smoke_run), "--baseline", str(degraded_path), *EVAL_ARGS])
+    # The smoke run's slices are tiny; lower the size floor so they are compared.
+    rc = evaluate_main(
+        [
+            "--run",
+            str(smoke_run),
+            "--baseline",
+            str(degraded_path),
+            "--min-slice-n",
+            "1",
+            *EVAL_ARGS,
+        ]
+    )
     assert rc == 1
     metrics = json.loads((smoke_run / "eval" / "metrics.json").read_text())
     assert metrics["regression"]["flag"] is True
